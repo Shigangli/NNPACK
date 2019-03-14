@@ -176,6 +176,8 @@ def main(args):
             if options.target.is_arm:
                 # Functions implemented in assembly
                 arch_nnpack_objects += [
+                    build.cc("neon/blas/h4gemm-aarch32.S"),
+                    build.cc("neon/blas/s4gemm-aarch32.S"),
                     build.cc("neon/blas/sgemm-aarch32.S"),
                 ]
         elif backend == "psimd":
@@ -288,7 +290,10 @@ def main(args):
         build.static_library("nnpack", nnpack_objects)
 
     # Build tests for micro-kernels. Link to the micro-kernels implementations
-    with build.options(source_dir="test", extra_include_dirs="test", deps=[build.deps.googletest, build.deps.cpuinfo]):
+    with build.options(source_dir="test", extra_include_dirs="test",
+            deps={
+                (build.deps.googletest, build.deps.cpuinfo, build.deps.clog, build.deps.fp16): any,
+                "log": build.target.is_android}):
 
         build.unittest("fourier-reference-test",
             reference_fft_objects + [build.cxx("fourier/reference.cc")])
@@ -321,6 +326,12 @@ def main(args):
 
             build.smoketest("sgemm-test",
                 arch_nnpack_objects + [build.cxx("sgemm/neon.cc")])
+
+            build.smoketest("sxgemm-test",
+                arch_nnpack_objects + [build.cxx("sxgemm/neon.cc")])
+
+            build.smoketest("hxgemm-test",
+                arch_nnpack_objects + [build.cxx("hxgemm/neon.cc")])
         elif backend == "scalar":
             build.smoketest("fourier-test",
                 reference_fft_objects + arch_fft_stub_objects + [build.cxx("fourier/scalar.cc")])
@@ -333,8 +344,9 @@ def main(args):
 
     # Build test for layers. Link to the library.
     with build.options(source_dir="test", include_dirs="test", deps={
-                (build, build.deps.pthreadpool, build.deps.cpuinfo, build.deps.googletest.core, build.deps.fp16): any,
-                "rt": build.target.is_linux
+                (build, build.deps.pthreadpool, build.deps.cpuinfo, build.deps.clog, build.deps.googletest.core, build.deps.fp16): any,
+                "rt": build.target.is_linux,
+                "log": build.target.is_android,
             }):
 
         if not options.inference_only:
@@ -421,16 +433,23 @@ def main(args):
 
     # Build automatic benchmarks
     with build.options(source_dir="bench", extra_include_dirs=["bench", "test"], macros=macros, deps={
-            (build, build.deps.pthreadpool, build.deps.cpuinfo, build.deps.googlebenchmark): all,
-            "rt": build.target.is_linux}):
+            (build, build.deps.pthreadpool, build.deps.cpuinfo, build.deps.clog, build.deps.fp16, build.deps.googlebenchmark): all,
+            "rt": build.target.is_linux,
+            "log": build.target.is_android}):
 
+        build.benchmark("convolution-inference-bench", build.cxx("convolution-inference.cc"))
         build.benchmark("sgemm-bench", build.cxx("sgemm.cc"))
+        build.benchmark("sxgemm-bench", build.cxx("sxgemm.cc"))
+        build.benchmark("hxgemm-bench", build.cxx("hxgemm.cc"))
+        build.benchmark("conv1x1-bench", build.cxx("conv1x1.cc"))
+        build.benchmark("winograd-bench", build.cxx("winograd.cc"))
 
     # Build benchmarking utilities
     if not options.inference_only and not build.target.is_android:
         with build.options(source_dir="bench", extra_include_dirs="bench", macros=macros, deps={
-                (build, build.deps.pthreadpool, build.deps.cpuinfo): all,
-                "rt": build.target.is_linux}):
+                (build, build.deps.pthreadpool, build.deps.cpuinfo, build.deps.clog): all,
+                "rt": build.target.is_linux,
+                "log": build.target.is_android}):
 
             support_objects = [build.cc("median.c")]
             if build.target.is_x86_64:
